@@ -4,10 +4,15 @@ const expect = std.testing.expect;
 
 fn encodeStr(comptime encoding: ctregex.Encoding, comptime str: []const u8) []const encoding.CharT() {
     return switch (encoding) {
-        .ascii, .utf8 => str,
+        .ascii, .utf8 => block: {
+            const out = str;
+            break :block out;
+        },
         .utf16le => block: {
             var temp: [str.len]u16 = undefined;
-            break :block temp[0 .. std.unicode.utf8ToUtf16Le(&temp, str) catch unreachable];
+            const len = std.unicode.utf8ToUtf16Le(&temp, str) catch unreachable;
+            const out = temp;
+            break :block out[0..len];
         },
         .codepoint => block: {
             var temp: [str.len]u21 = undefined;
@@ -17,7 +22,8 @@ fn encodeStr(comptime encoding: ctregex.Encoding, comptime str: []const u8) []co
                 temp[idx] = cp;
                 idx += 1;
             }
-            break :block temp[0..idx];
+            const out = temp;
+            break :block out[0..idx];
         },
     };
 }
@@ -63,7 +69,7 @@ fn testCapturesInner(comptime regex: []const u8, comptime encoding: ctregex.Enco
 fn testCaptures(comptime regex: []const u8, comptime encoding: ctregex.Encoding, comptime str: []const u8, comptime captures: []const ?[]const u8) !void {
     const encoded_str = comptime encodeStr(encoding, str);
     comptime var encoded_captures: [captures.len]?[]const encoding.CharT() = undefined;
-    inline for (captures) |capt, idx| {
+    inline for (captures, 0..) |capt, idx| {
         if (capt) |capt_slice| {
             encoded_captures[idx] = comptime encodeStr(encoding, capt_slice);
         } else {
@@ -71,12 +77,14 @@ fn testCaptures(comptime regex: []const u8, comptime encoding: ctregex.Encoding,
         }
     }
 
-    try testCapturesInner(regex, encoding, encoded_str, &encoded_captures);
-    comptime try testCapturesInner(regex, encoding, encoded_str, &encoded_captures);
+    const out = encoded_captures;
+    try testCapturesInner(regex, encoding, encoded_str, &out);
+    comptime try testCapturesInner(regex, encoding, encoded_str, &out);
 }
 
 test "regex matching" {
-    @setEvalBranchQuota(2550);
+    // Had to raise the eval branch quota a lot for 0.14.0 for some reason
+    @setEvalBranchQuota(5000);
     try testMatch("abc|def", .ascii, "abc");
     try testMatch("abc|def", .ascii, "def");
     try testMatch("[Α-Ω][α-ω]+", .utf8, "Αλεξανδρος");
@@ -92,7 +100,8 @@ test "regex matching" {
 }
 
 test "regex searching" {
-    @setEvalBranchQuota(3800);
+    // Had to raise the eval branch quota a lot for 0.14.0 for some reason
+    @setEvalBranchQuota(30000);
     try testSearch("foo|bar", .ascii, "some very interesting test string including foobar.", "foo");
     try testSearch("(abc|αβγ)+", .utf8, "a lorem ipsum αβγαβγαβγ abcabc", "αβγαβγαβγ");
     try testSearch("(abc|αβγ)+", .utf16le, "a lorem ipsum αβγαβγαβγ abcabc", "αβγαβγαβγ");
